@@ -1,4 +1,7 @@
-﻿#include <iostream>
+// LAN Monitor - chuyen doi Npcap sang WinDivert 2.2.2-A
+// Network layer: goi IP; khong co Ethernet frame/ARP. SNIFF: chi quan sat.
+
+#include <iostream>
 #include <fstream>
 #include <string>
 #include <sstream>
@@ -7,12 +10,28 @@
 #include <algorithm>
 #include <cctype>
 #include <vector>
-#include <pcap.h>
+#include <atomic>
+#include <mutex>
+#include <thread>
 #include <cstdint>
 #include <limits>
 #include <cstdio>
 #include <ctime>
 #include <conio.h>
+
+#include <winsock2.h>
+#include <windows.h>
+#include "windivert.h"
+
+#ifdef __out
+#undef __out
+#endif
+#ifdef __in
+#undef __in
+#endif
+#ifdef __inout
+#undef __inout
+#endif
 
 using namespace std;
 
@@ -221,14 +240,14 @@ bool matchesExactInsensitive(const string& value, const string& filter) {
     return toLower(trim(value)) == toLower(trim(filter));
 }
 
-string ipv4Text(const u_char* p) {
+string ipv4Text(const unsigned char* p) {
     char b[32];
     snprintf(b, sizeof(b), "%u.%u.%u.%u",
         (unsigned)p[0], (unsigned)p[1], (unsigned)p[2], (unsigned)p[3]);
     return b;
 }
 
-string ipv6Text(const u_char* p) {
+string ipv6Text(const unsigned char* p) {
     unsigned short groups[8];
     for (int i = 0; i < 8; ++i)
         groups[i] = (unsigned(p[i * 2]) << 8) | unsigned(p[i * 2 + 1]);
@@ -479,246 +498,126 @@ bool exportStatisticsCsv(const vector<Packet>& packets,
 }
 
 int runLiveCapture() {
-    pcap_if_t* devices = nullptr;
-    char errbuf[PCAP_ERRBUF_SIZE] = {};
-    if (pcap_findalldevs(&devices, errbuf) == -1) {
-        cerr << "Loi liet ke adapter: " << errbuf << '\n';
-        return 1;
-    }
-
-    int count = 0;
-    for (pcap_if_t* d = devices; d; d = d->next) {
-        ++count;
-        cout << count << ". " << (d->description ? d->description : d->name) << '\n';
-    }
-    if (count == 0) {
-        cerr << "Khong tim thay adapter mang.\n";
-        pcap_freealldevs(devices);
-        return 1;
-    }
-
-    int choice = 0;
-    cout << "Chon adapter (4 = Wi-Fi neu danh sach giong may thu): ";
-    if (!(cin >> choice) || choice < 1 || choice > count) {
-        cerr << "Lua chon khong hop le.\n";
-        pcap_freealldevs(devices);
-        return 1;
-    }
-    // Remove the newline left by cin >> choice before any later getline().
-    cin.ignore(numeric_limits<streamsize>::max(), '\n');
-
-    pcap_if_t* selected = devices;
-    for (int i = 1; i < choice; ++i) selected = selected->next;
-    if (!selected->name) {
-        pcap_freealldevs(devices);
-        cerr << "Adapter khong co ten.\n";
-        return 1;
-    }
-    string deviceName = selected->name;
-    pcap_freealldevs(devices);
-
-    char openError[PCAP_ERRBUF_SIZE] = {};
-    pcap_t* handle = pcap_open_live(deviceName.c_str(), 65536, 1, 250, openError);
-    if (!handle) {
-        cerr << "Khong mo duoc adapter: " << openError << '\n';
-        cerr << "Hay thu mo PowerShell bang Run as administrator.\n";
-        return 1;
-    }
-
-    int linkType = pcap_datalink(handle);
-    cout << "Kieu lien ket (DLT): " << linkType << '\n';
-    if (linkType != DLT_EN10MB) {
-        cerr << "Adapter nay khong tra ve khung Ethernet. Hay thu adapter khac.\n";
-        pcap_close(handle);
+    // WinDivert Network layer cung cap goi IP, khong co Ethernet header.
+    // SNIFF chi quan sat, khong chan/chuyen huong goi tin.
+    HANDLE handle = WinDivertOpen("true", WINDIVERT_LAYER_NETWORK, 0, WINDIVERT_FLAG_SNIFF);
+    if (handle == INVALID_HANDLE_VALUE) {
+        cerr << "Khong mo duoc WinDivert. Hay chay terminal bang Run as administrator.\n";
+        cerr << "Ma loi Windows: " << GetLastError() << '\n';
         return 1;
     }
 
     vector<Packet> packets;
-    unsigned long long totalBytes = 0, totalPackets = 0;
-    unsigned long long lastReportPackets = 0, lastReportBytes = 0;
-    time_t lastReport = time(nullptr);
+    mutex packetsMutex;
+    atomic<unsigned long long> totalBytes{0}, totalPackets{0};
+    atomic<bool> captureError{false};
+    cout << "\nDang bat goi IP tren cac giao dien mang cua may.\n";
+    cout << "Che do SNIFF: chi quan sat, khong can thiep luong mang.\nNhan q de dung.\n";
 
-    cout << "\nDang bat goi. Nhan q de dung.\n";
-    cout << "Chi giam sat luu luong tren adapter da chon.\n";
-
-    while (true) {
-        if (_kbhit()) {
-            int key = _getch();
-            if (key == 'q' || key == 'Q') break;
-        }
-
-        pcap_pkthdr* header = nullptr;
-        const u_char* data = nullptr;
-        int result = pcap_next_ex(handle, &header, &data);
-        if (result == -1) {
-            cerr << "\nLoi khi bat goi: " << pcap_geterr(handle) << '\n';
-            break;
-        }
-
-        if (result == 1 && header && data) {
+    thread captureThread([&]() {
+        unsigned char buffer[65535];
+        while (true) {
+            UINT recvLen = 0;
+            WINDIVERT_ADDRESS addr{};
+            if (!WinDivertRecv(handle, buffer, sizeof(buffer), &recvLen, &addr)) {
+                DWORD err = GetLastError();
+                if (err != ERROR_OPERATION_ABORTED && err != ERROR_INVALID_HANDLE) {
+                    cerr << "\nLoi WinDivertRecv, ma loi: " << err << '\n';
+                    captureError = true;
+                }
+                break;
+            }
+            if (recvLen == 0) continue;
             ++totalPackets;
-            totalBytes += header->caplen;
-
+            totalBytes += recvLen;
             Packet p;
             p.timestamp = currentTimestamp();
-            p.bytes = header->len;
-            p.sizeText = to_string(header->len);
+            p.bytes = recvLen;
+            p.sizeText = to_string(recvLen);
+            size_t n = recvLen;
+            unsigned int version = buffer[0] >> 4;
 
-            size_t n = header->caplen;
-            size_t off = 14;
-            if (n >= 14) {
-                unsigned int type = (unsigned(data[12]) << 8) | data[13];
-                while ((type == 0x8100 || type == 0x88a8) && n >= off + 4) {
-                    type = (unsigned(data[off + 2]) << 8) | data[off + 3];
-                    off += 4;
-                }
-
-                if (type == 0x0806) { // ARP
-                    p.addressType = "ARP";
-                    p.protocol = "ARP";
-                    if (n >= off + 28) {
-                        unsigned int htype = (unsigned(data[off]) << 8) | data[off + 1];
-                        unsigned int ptype = (unsigned(data[off + 2]) << 8) | data[off + 3];
-                        unsigned int hlen = data[off + 4], plen = data[off + 5];
-                        if (htype == 1 && ptype == 0x0800 && hlen == 6 && plen == 4) {
-                            p.source.ip = ipv4Text(data + off + 14);
-                            p.destination.ip = ipv4Text(data + off + 24);
-                        }
-                    }
-                } else if (type == 0x0800 && n >= off + 20) { // IPv4
-                    unsigned int version = data[off] >> 4;
-                    unsigned int ihl = (data[off] & 0x0F) * 4;
-                    if (version == 4 && ihl >= 20 && n >= off + ihl) {
-                        p.addressType = "IPv4";
-                        p.source.ip = ipv4Text(data + off + 12);
-                        p.destination.ip = ipv4Text(data + off + 16);
-                        unsigned int proto = data[off + 9];
-                        size_t transport = off + ihl;
-                        if (proto == 6) p.protocol = "TCP";
-                        else if (proto == 17) p.protocol = "UDP";
-                        else if (proto == 1) p.protocol = "ICMP";
-                        else p.protocol = "IPv4";
-
-                        unsigned int fragment = (unsigned(data[off + 6]) << 8) | data[off + 7];
-                        bool firstFragment = (fragment & 0x1FFF) == 0;
-                        if ((proto == 6 || proto == 17) && firstFragment &&
-                            n >= transport + 4) {
-                            p.source.port = to_string((unsigned(data[transport]) << 8) |
-                                                      data[transport + 1]);
-                            p.destination.port = to_string((unsigned(data[transport + 2]) << 8) |
-                                                           data[transport + 3]);
-                        }
-                    }
-                } else if (type == 0x86dd && n >= off + 40 &&
-                           (data[off] >> 4) == 6) { // IPv6
-                    p.addressType = "IPv6";
-                    p.source.ip = ipv6Text(data + off + 8);
-                    p.destination.ip = ipv6Text(data + off + 24);
-                    unsigned int next = data[off + 6];
-                    size_t transport = off + 40;
-                    bool valid = true, nonInitialFragment = false;
-
-                    for (int i = 0; i < 8; ++i) {
-                        if (next == 0 || next == 43 || next == 60 ||
-                            next == 135 || next == 139 || next == 140) {
-                            if (transport + 2 > n) { valid = false; break; }
-                            size_t len = (size_t(data[transport + 1]) + 1) * 8;
-                            if (len < 8 || transport + len > n) { valid = false; break; }
-                            next = data[transport];
-                            transport += len;
-                        } else if (next == 44) {
-                            if (transport + 8 > n) { valid = false; break; }
-                            unsigned int fragField = (unsigned(data[transport + 2]) << 8) |
-                                                     data[transport + 3];
-                            if ((fragField & 0xFFF8) != 0) nonInitialFragment = true;
-                            next = data[transport];
-                            transport += 8;
-                        } else if (next == 51) {
-                            if (transport + 2 > n) { valid = false; break; }
-                            size_t len = (size_t(data[transport + 1]) + 2) * 4;
-                            if (len < 8 || transport + len > n) { valid = false; break; }
-                            next = data[transport];
-                            transport += len;
-                        } else {
-                            break;
-                        }
-                    }
-
-                    if (next == 6) p.protocol = "TCP";
-                    else if (next == 17) p.protocol = "UDP";
-                    else if (next == 58) p.protocol = "ICMPv6";
-                    else p.protocol = "IPv6";
-
-                    if (valid && !nonInitialFragment && (next == 6 || next == 17) &&
-                        transport + 4 <= n) {
-                        p.source.port = to_string((unsigned(data[transport]) << 8) |
-                                                  data[transport + 1]);
-                        p.destination.port = to_string((unsigned(data[transport + 2]) << 8) |
-                                                       data[transport + 3]);
+            if (version == 4 && n >= 20) {
+                size_t ihl = (buffer[0] & 0x0F) * 4;
+                if (ihl >= 20 && n >= ihl) {
+                    p.addressType = "IPv4";
+                    p.source.ip = ipv4Text(buffer + 12);
+                    p.destination.ip = ipv4Text(buffer + 16);
+                    unsigned int proto = buffer[9];
+                    if (proto == 6) p.protocol = "TCP";
+                    else if (proto == 17) p.protocol = "UDP";
+                    else if (proto == 1) p.protocol = "ICMP";
+                    else p.protocol = "IPv4";
+                    unsigned int frag = (unsigned(buffer[6]) << 8) | buffer[7];
+                    if ((proto == 6 || proto == 17) && (frag & 0x1FFF) == 0 && n >= ihl + 4) {
+                        p.source.port = to_string((unsigned(buffer[ihl]) << 8) | buffer[ihl+1]);
+                        p.destination.port = to_string((unsigned(buffer[ihl+2]) << 8) | buffer[ihl+3]);
                     }
                 }
-            }
-
-            packets.push_back(p);
+            } else if (version == 6 && n >= 40) {
+                p.addressType = "IPv6";
+                p.source.ip = ipv6Text(buffer + 8);
+                p.destination.ip = ipv6Text(buffer + 24);
+                unsigned int next = buffer[6];
+                size_t off = 40;
+                bool valid = true, nonInitialFragment = false;
+                for (int i = 0; i < 8; ++i) {
+                    if (next == 0 || next == 43 || next == 60 || next == 135 || next == 139 || next == 140) {
+                        if (off + 2 > n) { valid = false; break; }
+                        size_t len = (size_t(buffer[off+1]) + 1) * 8;
+                        if (len < 8 || off + len > n) { valid = false; break; }
+                        next = buffer[off]; off += len;
+                    } else if (next == 44) {
+                        if (off + 8 > n) { valid = false; break; }
+                        unsigned int ff = (unsigned(buffer[off+2]) << 8) | buffer[off+3];
+                        if ((ff & 0xFFF8) != 0) nonInitialFragment = true;
+                        next = buffer[off]; off += 8;
+                    } else if (next == 51) {
+                        if (off + 2 > n) { valid = false; break; }
+                        size_t len = (size_t(buffer[off+1]) + 2) * 4;
+                        if (len < 8 || off + len > n) { valid = false; break; }
+                        next = buffer[off]; off += len;
+                    } else break;
+                }
+                if (next == 6) p.protocol = "TCP";
+                else if (next == 17) p.protocol = "UDP";
+                else if (next == 58) p.protocol = "ICMPv6";
+                else p.protocol = "IPv6";
+                if (valid && !nonInitialFragment && (next == 6 || next == 17) && off + 4 <= n) {
+                    p.source.port = to_string((unsigned(buffer[off]) << 8) | buffer[off+1]);
+                    p.destination.port = to_string((unsigned(buffer[off+2]) << 8) | buffer[off+3]);
+                }
+            } else { p.addressType = "Khac"; p.protocol = "OTHER"; }
+            lock_guard<mutex> lock(packetsMutex);
+            packets.push_back(std::move(p));
         }
+    });
 
-        time_t now = time(nullptr);
-        if (now != lastReport) {
-            unsigned long long packetDelta = totalPackets - lastReportPackets;
-            unsigned long long byteDelta = totalBytes - lastReportBytes;
-            tm localTime{};
-#ifdef _WIN32
-            localtime_s(&localTime, &now);
-#else
-            localtime_r(&now, &localTime);
-#endif
-            cout << "\n[" << put_time(&localTime, "%H:%M:%S")
-                 << "] Tong goi: " << totalPackets
-                 << " | Byte bat duoc: " << totalBytes
-                 << " | Goi/giay gan day: " << packetDelta
-                 << " | Byte/giay gan day: " << byteDelta << '\n';
-            lastReportPackets = totalPackets;
-            lastReportBytes = totalBytes;
-            lastReport = now;
-        }
+    while (true) {
+        if (_kbhit()) { int key = _getch(); if (key == 'q' || key == 'Q') break; }
+        Sleep(50);
     }
-
-    pcap_close(handle);
-    cout << "\nDa dung bat goi.\n";
-    cout << "Tong so goi: " << totalPackets << '\n';
-    cout << "Tong byte bat duoc: " << totalBytes << '\n';
+    WinDivertShutdown(handle, WINDIVERT_SHUTDOWN_RECV);
+    if (captureThread.joinable()) captureThread.join();
+    WinDivertClose(handle);
+    cout << "\nDa dung bat goi.\nTong so goi: " << totalPackets.load()
+         << "\nTong byte bat duoc: " << totalBytes.load() << '\n';
+    if (captureError) cerr << "Qua trinh bat goi ket thuc do loi WinDivert.\n";
 
     string ipFilter, portFilter, protocolFilter;
     cout << "\nIP nguon/dich chinh xac (Enter = tat ca): " << flush;
-    if (!getline(cin, ipFilter)) {
-        cerr << "\nLoi doc bo loc IP.\n";
-        return 1;
-    }
+    if (!getline(cin, ipFilter)) return 1;
     cout << "Cong nguon/dich chinh xac (Enter = tat ca): " << flush;
-    if (!getline(cin, portFilter)) {
-        cerr << "\nLoi doc bo loc cong.\n";
-        return 1;
-    }
-    cout << "Giao thuc (TCP/UDP/ICMP/ICMPv6/ARP/IPv4/IPv6; Enter = tat ca): " << flush;
-    if (!getline(cin, protocolFilter)) {
-        cerr << "\nLoi doc bo loc giao thuc.\n";
-        return 1;
-    }
-
-    ipFilter = trim(ipFilter);
-    portFilter = trim(portFilter);
-    protocolFilter = trim(protocolFilter);
-    vector<Packet> filtered = filterPackets(packets, ipFilter, portFilter, protocolFilter);
+    if (!getline(cin, portFilter)) return 1;
+    cout << "Giao thuc (TCP/UDP/ICMP/ICMPv6/IPv4/IPv6; Enter = tat ca): " << flush;
+    if (!getline(cin, protocolFilter)) return 1;
+    vector<Packet> filtered = filterPackets(packets, trim(ipFilter), trim(portFilter), trim(protocolFilter));
     showPackets(filtered);
-
     cout << "\n--- THONG KE GOI DA LOC ---\n";
     showLiveStatistics(filtered);
-
     exportCsv(filtered, "live_packets.csv");
-    bool statsExported = exportStatisticsCsv(filtered, "live_statistics.csv");
-    cout << (statsExported ? "Da xuat xong bao cao thong ke.\n"
-                          : "Xuat bao cao thong ke that bai.\n");
-
+    bool ok = exportStatisticsCsv(filtered, "live_statistics.csv");
+    cout << (ok ? "Da xuat xong bao cao thong ke.\n" : "Xuat bao cao thong ke that bai.\n");
     return 0;
 }
 
@@ -835,7 +734,7 @@ int main() {
     cout << "             LAN MONITOR\n";
     cout << "============================================\n";
     cout << "1. Phan tich file capture_utf8.txt\n";
-    cout << "2. Bat goi truc tiep bang Npcap\n";
+    cout << "2. Bat goi truc tiep bang WinDivert\n";
     cout << "Chon che do (1/2): ";
 
     string mode;

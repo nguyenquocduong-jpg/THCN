@@ -1,0 +1,1508 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LAN Monitor | Network Analytics</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        :root {
+            --bg: #080d18;
+            --panel: #101a2b;
+            --border: #23334c;
+            --text: #e8f0ff;
+            --muted: #8da2bf;
+            --cyan: #21d4fd;
+            --green: #31e6a2;
+            --purple: #a78bfa;
+            --red: #ff647c;
+        }
+
+        * {
+            box-sizing: border-box
+        }
+
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font-family: "Segoe UI", Arial, sans-serif;
+        }
+
+        header {
+            height: 68px;
+            padding: 0 25px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #0d1626;
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .logo {
+            font-size: 21px;
+            font-weight: 800;
+            letter-spacing: 1px
+        }
+
+        .logo span {
+            color: var(--cyan)
+        }
+
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .dot {
+            width: 9px;
+            height: 9px;
+            background: var(--red);
+            border-radius: 50%;
+        }
+
+        .dot.active {
+            background: var(--green);
+            box-shadow: 0 0 12px var(--green);
+        }
+
+        .layout {
+            display: flex;
+            min-height: calc(100vh - 68px)
+        }
+
+        .sidebar {
+            width: 225px;
+            flex-shrink: 0;
+            padding: 23px 15px;
+            background: #0d1626;
+            border-right: 1px solid var(--border);
+        }
+
+        .side-title {
+            color: #627a9b;
+            font-size: 11px;
+            letter-spacing: 2px;
+            margin: 17px 10px 10px;
+        }
+
+        .nav {
+            display: block;
+            width: 100%;
+            padding: 13px;
+            margin: 5px 0;
+            border: 1px solid transparent;
+            border-radius: 9px;
+            color: var(--muted);
+            background: transparent;
+            text-align: left;
+            font-size: 14px;
+            cursor: pointer;
+            transition: .2s;
+        }
+
+        .nav:hover {
+            color: var(--cyan);
+            background: #142c43
+        }
+
+        .nav.active {
+            color: var(--cyan);
+            background: #142c43;
+            border-color: #1d5065;
+        }
+
+        main {
+            flex: 1;
+            min-width: 0;
+            padding: 27px
+        }
+
+        .page {
+            display: none;
+            animation: fade .2s ease
+        }
+
+        .page.active {
+            display: block
+        }
+
+        @keyframes fade {
+            from {
+                opacity: .5;
+                transform: translateY(4px)
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0)
+            }
+        }
+
+        .page-title {
+            font-size: 25px;
+            font-weight: 750
+        }
+
+        .subtitle {
+            color: var(--muted);
+            margin-top: 7px;
+            font-size: 13px
+        }
+
+        .panel,
+        .card {
+            background: linear-gradient(145deg, var(--panel), #0e1929);
+            border: 1px solid var(--border);
+            border-radius: 13px;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin: 22px 0 12px;
+        }
+
+        select,
+        input {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            color: var(--text);
+            padding: 11px 13px;
+            border-radius: 8px;
+            outline: none;
+        }
+
+        select {
+            min-width: 250px;
+            max-width: 100%
+        }
+
+        input {
+            min-width: 190px;
+            max-width: 100%
+        }
+
+        button {
+            border: 0;
+            border-radius: 8px;
+            padding: 11px 17px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: .2s;
+        }
+
+        button:hover {
+            filter: brightness(1.12)
+        }
+
+        button:disabled {
+            opacity: .45;
+            cursor: not-allowed
+        }
+
+        .start {
+            background: linear-gradient(100deg, #12cfa0, #21d4fd);
+            color: #06131c;
+        }
+
+        .stop {
+            background: #48202d;
+            color: #ff8193;
+            border: 1px solid #84384c;
+        }
+
+        .secondary {
+            background: #1b2c43;
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        .danger {
+            background: #48202d;
+            color: #ff8193;
+            border: 1px solid #84384c;
+        }
+
+        .hint,
+        .message {
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.6;
+        }
+
+        .error {
+            color: #ff8193
+        }
+
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .card {
+            padding: 19px;
+            min-height: 120px
+        }
+
+        .card-label {
+            color: var(--muted);
+            font-size: 12px
+        }
+
+        .card-value {
+            font-size: 26px;
+            font-weight: 800;
+            margin-top: 16px;
+            overflow-wrap: anywhere
+        }
+
+        .cyan {
+            color: var(--cyan)
+        }
+
+        .green {
+            color: var(--green)
+        }
+
+        .purple {
+            color: var(--purple)
+        }
+
+        .red {
+            color: #ff8193
+        }
+
+        .content-grid {
+            display: grid;
+            grid-template-columns: 1.7fr 1fr;
+            gap: 16px;
+            margin-top: 18px;
+        }
+
+        .panel {
+            padding: 20px;
+            min-width: 0
+        }
+
+        .panel h3 {
+            margin: 0 0 17px;
+            font-size: 15px
+        }
+
+        .chart-box {
+            height: 270px;
+            position: relative
+        }
+
+        .table-panel {
+            margin-top: 18px
+        }
+
+        .table-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .table-wrap {
+            overflow-x: auto
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            white-space: nowrap;
+            font-size: 13px;
+        }
+
+        th {
+            color: var(--muted);
+            font-weight: 600;
+            text-align: left;
+            padding: 13px;
+            background: #142137;
+        }
+
+        td {
+            padding: 13px;
+            border-bottom: 1px solid #1c2a40
+        }
+
+        tr:hover td {
+            background: #142137
+        }
+
+        .tag {
+            padding: 5px 9px;
+            border-radius: 6px;
+            background: #163b51;
+            color: var(--cyan);
+            font-size: 11px;
+            font-weight: 700;
+        }
+
+        .empty {
+            text-align: center;
+            color: var(--muted);
+            padding: 25px
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+        }
+
+        .info-item {
+            background: #142137;
+            padding: 15px;
+            border-radius: 9px;
+            border: 1px solid var(--border);
+        }
+
+        .info-item small {
+            color: var(--muted)
+        }
+
+        .info-item strong {
+            display: block;
+            margin-top: 8px;
+            overflow-wrap: anywhere;
+        }
+
+        .setting-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 15px;
+            padding: 17px 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .setting-row:last-child {
+            border-bottom: 0
+        }
+
+        .setting-description {
+            font-size: 13px;
+            color: var(--muted);
+            margin-top: 5px
+        }
+
+        .setting-row select {
+            min-width: 160px
+        }
+
+        .mobile-menu {
+            display: none
+        }
+
+        .footer {
+            margin-top: 25px;
+            color: #627a9b;
+            font-size: 11px;
+        }
+
+        @media(max-width:1050px) {
+            .cards {
+                grid-template-columns: repeat(2, minmax(0, 1fr))
+            }
+
+            .content-grid {
+                grid-template-columns: 1fr
+            }
+        }
+
+        @media(max-width:700px) {
+            header {
+                height: 60px;
+                padding: 0 14px
+            }
+
+            .mobile-menu {
+                display: block
+            }
+
+            .layout {
+                display: block
+            }
+
+            .sidebar {
+                display: none;
+                width: 100%;
+                padding: 10px 14px;
+                border-right: 0;
+                border-bottom: 1px solid var(--border);
+            }
+
+            .sidebar.open {
+                display: block
+            }
+
+            .side-title {
+                margin-top: 10px
+            }
+
+            main {
+                padding: 17px
+            }
+
+            .cards {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 9px
+            }
+
+            .card {
+                padding: 13px;
+                min-height: 105px
+            }
+
+            .card-value {
+                font-size: 20px
+            }
+
+            .page-title {
+                font-size: 22px
+            }
+
+            select,
+            input {
+                width: 100%;
+                min-width: 0
+            }
+
+            .controls button {
+                flex: 1
+            }
+
+            .info-grid {
+                grid-template-columns: 1fr
+            }
+        }
+
+        /* Dinh dang dong hang chuan cho cot SOURCE va DESTINATION */
+        /* Dinh dang chuan cho dia chi IP mang LAN */
+        .ip-wrapper {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-family: Consolas, "Courier New", monospace;
+            font-size: 13px;
+            white-space: nowrap;
+        }
+
+        .ip-text {
+            color: #ffffff;
+            font-weight: 600;
+            letter-spacing: 0.2px;
+            display: inline-block;
+            min-width: 145px;
+            vertical-align: middle;
+            flex-shrink: 0;
+            white-space: nowrap;
+        }
+
+        .ip-port {
+            color: var(--cyan);
+            font-weight: 700;
+            display: inline-block;
+            min-width: 55px;
+            flex-shrink: 0;
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <div style="display:flex;align-items:center;gap:13px">
+            <button class="secondary mobile-menu" onclick="toggleMenu()" aria-label="Mở menu">☰</button>
+            <div class="logo">LAN <span>MONITOR</span></div>
+        </div>
+        <div class="status">
+            <span class="dot" id="statusDot"></span>
+            <span id="statusText">Đang kết nối...</span>
+        </div>
+    </header>
+
+    <div class="layout">
+
+        <aside class="sidebar" id="sidebar">
+            <div class="side-title">MONITORING</div>
+            <button class="nav active" data-page="overview" onclick="navigateTo('overview',this)">▦ Tổng quan</button>
+            <button class="nav" data-page="protocol" onclick="navigateTo('protocol',this)">◉ Phân tích giao
+                thức</button>
+            <button class="nav" data-page="devices" onclick="navigateTo('devices',this)">⌘ Thiết bị mạng</button>
+            <button class="nav" data-page="packets" onclick="navigateTo('packets',this)">▤ Lịch sử gói tin</button>
+
+            <div class="side-title">SYSTEM</div>
+            <button class="nav" data-page="settings" onclick="navigateTo('settings',this)">⚙ Cấu hình</button>
+        </aside>
+
+        <main>
+
+            <!-- TỔNG QUAN -->
+            <section class="page active" id="page-overview">
+                <div class="page-title">Network Dashboard</div>
+                <div class="subtitle">Giám sát lưu lượng mạng theo thời gian thực</div>
+
+                <div class="cards">
+                    <div class="card">
+                        <div class="card-label">TỔNG GÓI TIN</div>
+                        <div class="card-value cyan" id="totalPackets">0</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-label">TỔNG DỮ LIỆU</div>
+                        <div class="card-value green" id="totalBytes">0 B</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-label">PACKETS / SECOND</div>
+                        <div class="card-value purple" id="pps">0</div>
+                    </div>
+                    <div class="card">
+                        <div class="card-label">BITS / SECOND</div>
+                        <div class="card-value red" id="bps">0 bps</div>
+                    </div>
+                </div>
+
+                <section class="content-grid">
+                    <div class="panel">
+                        <h3>◈ Network Traffic</h3>
+                        <div class="chart-box"><canvas id="trafficChart"></canvas></div>
+                    </div>
+                    <div class="panel">
+                        <h3>◉ Protocol Distribution</h3>
+                        <div class="chart-box"><canvas id="protocolChart"></canvas></div>
+                    </div>
+                </section>
+
+                <section class="panel table-panel">
+                    <div class="table-head">
+                        <h3>▤ Gói tin gần đây</h3>
+                        <button class="secondary" onclick="navigateTo('packets')">Xem tất cả →</button>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>TIME</th>
+                                    <th>PROTOCOL</th>
+                                    <th>SOURCE</th>
+                                    <th>DESTINATION</th>
+                                    <th>LENGTH</th>
+                                </tr>
+                            </thead>
+                            <tbody id="overviewPackets">
+                                <tr>
+                                    <td colspan="5" class="empty">Chưa có dữ liệu</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </section>
+
+            <!-- PHÂN TÍCH GIAO THỨC -->
+            <section class="page" id="page-protocol">
+                <div class="page-title">Phân tích giao thức</div>
+                <div class="subtitle">Thống kê các giao thức được bộ bắt gói tin nhận diện</div>
+
+                <section class="content-grid">
+                    <div class="panel">
+                        <h3>◉ Phân bố giao thức</h3>
+                        <div class="chart-box"><canvas id="protocolDetailChart"></canvas></div>
+                    </div>
+                    <div class="panel">
+                        <h3>Thông tin thống kê</h3>
+                        <div class="info-grid">
+                            <div class="info-item"><small>Số loại giao thức</small><strong id="protocolKinds">0</strong>
+                            </div>
+                            <div class="info-item"><small>Tổng gói tin</small><strong id="protocolTotal">0</strong>
+                            </div>
+                        </div>
+                        <p class="message">Số liệu được lấy từ API trạng thái của chương trình C++.</p>
+                    </div>
+                </section>
+
+                <section class="panel table-panel">
+                    <h3>Bảng thống kê giao thức</h3>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>GIAO THỨC</th>
+                                    <th>SỐ GÓI TIN</th>
+                                    <th>TỶ LỆ</th>
+                                </tr>
+                            </thead>
+                            <tbody id="protocolTable">
+                                <tr>
+                                    <td colspan="3" class="empty">Đang chờ dữ liệu</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </section>
+
+            <!-- THIẾT BỊ MẠNG -->
+            <section class="page" id="page-devices">
+                <div class="page-title">Thiết bị mạng</div>
+                <div class="subtitle">Chọn card mạng để bắt đầu hoặc dừng giám sát</div>
+
+                <section class="panel" style="margin-top:20px">
+                    <h3>⌘ Card mạng</h3>
+                    <div class="controls">
+                        <select id="adapterSelect">
+                            <option value="">Đang tải card mạng...</option>
+                        </select>
+                        <button class="secondary" id="refreshBtn" onclick="loadAdapters()">↻ Tải lại card</button>
+                        <button class="start" id="startBtn" onclick="startCapture()">▶ START CAPTURE</button>
+                        <button class="stop" id="stopBtn" onclick="stopCapture()">■ STOP</button>
+                    </div>
+                    <div class="hint" id="adapterHint">Chọn card Wi-Fi hoặc Ethernet.</div>
+                </section>
+
+                <section class="panel table-panel">
+                    <h3>Thông tin giám sát</h3>
+                    <div class="info-grid">
+                        <div class="info-item"><small>Trạng thái</small><strong id="deviceCaptureState">Đang
+                                dừng</strong></div>
+                        <div class="info-item"><small>Card đang chọn</small><strong id="deviceSelected">Chưa
+                                chọn</strong></div>
+                        <div class="info-item"><small>Tổng gói tin</small><strong id="devicePackets">0</strong></div>
+                        <div class="info-item"><small>Tổng dung lượng</small><strong id="deviceBytes">0 B</strong></div>
+                    </div>
+                    <p class="message">Chỉ chọn card mạng mà bạn có quyền giám sát. Nên ưu tiên Wi-Fi hoặc Ethernet,
+                        không chọn Loopback nếu muốn quan sát lưu lượng mạng LAN.</p>
+                </section>
+            </section>
+
+            <!-- LỊCH SỬ GÓI TIN -->
+            <section class="page" id="page-packets">
+                <div class="page-title">Lịch sử gói tin</div>
+                <div class="subtitle">Tìm kiếm và xem các gói tin đã được chương trình ghi nhận</div>
+
+                <section class="panel table-panel">
+                    <div class="table-head">
+                        <h3>▤ Packet History</h3>
+                        <div class="controls" style="margin:0">
+                            <input id="searchInput" placeholder="Tìm IP / giao thức / port..."
+                                oninput="renderPackets()">
+                            <select id="protocolFilter" onchange="renderPackets()">
+                                <option value="">Tất cả giao thức</option>
+                            </select>
+                            <select id="ipVersionFilter" onchange="renderPackets(); renderOverviewPackets();" style="border-color:#1d5065">
+                                <option value="ipv4" selected>Chỉ IPv4 (Chuẩn LAN 192.168.x.x)</option>
+                                <option value="all">Tất cả (Cả IPv4 & IPv6)</option>
+                                <option value="ipv6">Chỉ IPv6</option>
+                            </select>
+                            <button class="secondary" onclick="exportCSV()">↓ Xuất CSV</button>
+                            <button class="danger" onclick="clearPacketView()">Xóa hiển thị</button>
+                        </div>
+                    </div>
+                    <div class="table-wrap">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>TIME</th>
+                                    <th>PROTOCOL</th>
+                                    <th>SOURCE</th>
+                                    <th>DESTINATION</th>
+                                    <th>LENGTH</th>
+                                </tr>
+                            </thead>
+                            <tbody id="packetTable">
+                                <tr>
+                                    <td colspan="5" class="empty">Chưa có dữ liệu gói tin</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="message" id="packetCount">Đang chờ dữ liệu...</div>
+                </section>
+            </section>
+
+            <!-- CẤU HÌNH -->
+            <section class="page" id="page-settings">
+                <div class="page-title">Cấu hình</div>
+                <div class="subtitle">Tùy chỉnh cách giao diện cập nhật và hiển thị dữ liệu</div>
+
+                <section class="panel" style="margin-top:20px">
+                    <h3>⚙ Cấu hình hiển thị</h3>
+
+                    <div class="setting-row">
+                        <div>
+                            <strong>Chu kỳ cập nhật</strong>
+                            <div class="setting-description">Khoảng thời gian giữa hai lần lấy dữ liệu từ máy chủ</div>
+                        </div>
+                        <select id="refreshInterval" onchange="changeRefreshInterval()">
+                            <option value="500">0,5 giây</option>
+                            <option value="1000" selected>1 giây</option>
+                            <option value="2000">2 giây</option>
+                            <option value="5000">5 giây</option>
+                        </select>
+                    </div>
+
+                    <div class="setting-row">
+                        <div>
+                            <strong>Số gói tin tối đa hiển thị</strong>
+                            <div class="setting-description">Giới hạn số dòng trong bảng lịch sử</div>
+                        </div>
+                        <select id="maxRows" onchange="renderPackets()">
+                            <option value="50">50 gói tin</option>
+                            <option value="100" selected>100 gói tin</option>
+                            <option value="250">250 gói tin</option>
+                            <option value="500">500 gói tin</option>
+                        </select>
+                    </div>
+
+                    <div class="setting-row">
+                        <div>
+                            <strong>Đặt lại toàn bộ dữ liệu (Reset)</strong>
+                            <div class="setting-description">Xóa sạch số gói tin, dung lượng, biểu đồ và lịch sử về 0</div>
+                        </div>
+                        <button class="danger" onclick="clearPacketView()">Xóa dữ liệu</button>
+                    </div>
+
+                    <div class="setting-row">
+                        <div>
+                            <strong>Tải lại danh sách card mạng</strong>
+                            <div class="setting-description">Yêu cầu máy chủ quét lại danh sách card mạng mới nhất</div>
+                        </div>
+                        <button class="secondary" onclick="loadAdapters(true)">↻ Tải lại</button>
+                    </div>
+                </section>
+
+                <section class="panel table-panel">
+                    <h3>Thông tin ứng dụng</h3>
+                    <div class="info-grid">
+                        <div class="info-item"><small>Ứng dụng</small><strong>LAN Monitor</strong></div>
+                        <div class="info-item"><small>Giao diện</small><strong>Network Analytics</strong></div>
+                        <div class="info-item"><small>Địa chỉ máy chủ</small><strong>127.0.0.1:8080</strong></div>
+                        <div class="info-item"><small>Thư viện bắt gói tin</small><strong>WinDivert</strong></div>
+                    </div>
+                    <p class="message">Giao diện này sử dụng API cục bộ của chương trình C++. Không công khai máy chủ
+                        giám sát ra Internet.</p>
+                </section>
+            </section>
+
+            <div class="footer">LAN MONITOR · LOCAL NETWORK ANALYTICS</div>
+        </main>
+    </div>
+
+    <script>
+        "use strict";
+
+        let packets = [];
+        let protocols = {};
+        let trafficLabels = [];
+        let trafficValues = [];
+        let trafficChart = null;
+        let protocolChart = null;
+        let protocolDetailChart = null;
+        let polling = false;
+        let timer = null;
+        let refreshMs = 1000;
+        let captureActive = false;
+        let packetViewCleared = false;
+        let lastStatus = {};
+
+        function $(id) {
+            return document.getElementById(id);
+        }
+
+        function formatBytes(bytes) {
+            let value = Number(bytes) || 0;
+            const units = ["B", "KB", "MB", "GB", "TB"];
+            let i = 0;
+            while (value >= 1024 && i < units.length - 1) {
+                value /= 1024;
+                i++;
+            }
+            return value.toFixed(i === 0 ? 0 : 2) + " " + units[i];
+        }
+
+        function formatRate(value) {
+            value = Number(value) || 0;
+            const units = ["bps", "Kbps", "Mbps", "Gbps"];
+            let i = 0;
+            while (value >= 1000 && i < units.length - 1) {
+                value /= 1000;
+                i++;
+            }
+            return value.toFixed(2) + " " + units[i];
+        }
+
+        function setStatus(active, text) {
+            $("statusDot").classList.toggle("active", !!active);
+            $("statusText").textContent =
+                text || (active ? "ĐANG GIÁM SÁT" : "ĐANG DỪNG");
+        }
+
+        function navigateTo(page, element) {
+            const target = $("page-" + page);
+            if (!target) return;
+
+            document.querySelectorAll(".page").forEach(p => {
+                p.classList.remove("active");
+            });
+
+            target.classList.add("active");
+
+            document.querySelectorAll(".nav").forEach(n => {
+                n.classList.remove("active");
+            });
+
+            if (element) {
+                element.classList.add("active");
+            } else {
+                const nav = document.querySelector('.nav[data-page="' + page + '"]');
+                if (nav) nav.classList.add("active");
+            }
+
+            $("sidebar").classList.remove("open");
+
+            setTimeout(() => {
+                if (trafficChart) trafficChart.resize();
+                if (protocolChart) protocolChart.resize();
+                if (protocolDetailChart) protocolDetailChart.resize();
+            }, 100);
+        }
+
+        function toggleMenu() {
+            $("sidebar").classList.toggle("open");
+        }
+
+        async function api(url, options = {}) {
+            const response = await fetch(url, {
+                cache: "no-store",
+                ...options
+            });
+
+            const text = await response.text();
+            let data = {};
+
+            try {
+                data = text ? JSON.parse(text) : {};
+            } catch {
+                throw new Error("Máy chủ trả về dữ liệu không hợp lệ: " + text.slice(0, 150));
+            }
+
+            if (!response.ok) {
+                throw new Error(data.error || ("HTTP " + response.status));
+            }
+
+            if (data && data.error) {
+                throw new Error(data.error);
+            }
+
+            return data;
+        }
+
+        function createChart(canvasId, type, labels, values, title) {
+            if (typeof Chart === "undefined") return null;
+
+            const canvas = $(canvasId);
+            if (!canvas) return null;
+
+            return new Chart(canvas, {
+                type,
+                data: {
+                    labels,
+                    datasets: [{
+                        label: title,
+                        data: values,
+                        backgroundColor: type === "doughnut"
+                            ? ["#21d4fd", "#4776e6", "#31e6a2", "#a78bfa", "#ff647c", "#fbbf24", "#fb923c", "#64748b"]
+                            : "rgba(33,212,253,.15)",
+                        borderColor: type === "doughnut"
+                            ? ["#21d4fd", "#4776e6", "#31e6a2", "#a78bfa", "#ff647c", "#fbbf24", "#fb923c", "#64748b"]
+                            : "#21d4fd",
+                        borderWidth: type === "doughnut" ? 1 : 2,
+                        fill: type !== "doughnut",
+                        tension: .35,
+                        pointRadius: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    plugins: {
+                        legend: {
+                            display: type === "doughnut",
+                            position: "bottom",
+                            labels: { color: "#c5d3e8", padding: 13 }
+                        }
+                    },
+                    scales: type === "doughnut" ? {} : {
+                        x: {
+                            ticks: { color: "#8da2bf", maxTicksLimit: 8 },
+                            grid: { color: "#1c2a40" }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            ticks: { color: "#8da2bf" },
+                            grid: { color: "#1c2a40" }
+                        }
+                    }
+                }
+            });
+        }
+
+        function initCharts() {
+            trafficChart = createChart(
+                "trafficChart", "line", trafficLabels, trafficValues, "Bits / second"
+            );
+            protocolChart = createChart(
+                "protocolChart", "doughnut", [], [], "Packets"
+            );
+            protocolDetailChart = createChart(
+                "protocolDetailChart", "doughnut", [], [], "Packets"
+            );
+
+            if (!trafficChart || !protocolChart || !protocolDetailChart) {
+                $("packetCount").textContent =
+                    "Không tải được Chart.js. Bảng dữ liệu vẫn có thể hoạt động.";
+            }
+        }
+
+        async function loadAdapters(showNotify = false) {
+            const select = $("adapterSelect");
+            select.replaceChildren(new Option("Đang tải danh sách card mạng...", ""));
+
+            try {
+                const data = await api("/api/adapters");
+                const adapters = data.adapters || data.items || [];
+
+                if (!Array.isArray(adapters) || adapters.length === 0) {
+                    throw new Error("Không tìm thấy card mạng.");
+                }
+
+                select.replaceChildren();
+
+                const normal = adapters.filter(a => !a.loopback);
+                const loopbacks = adapters.filter(a => a.loopback);
+
+                function addGroup(label, items) {
+                    if (!items.length) return;
+
+                    const group = document.createElement("optgroup");
+                    group.label = label;
+
+                    items.forEach(a => {
+                        const option = document.createElement("option");
+                        option.value = String(a.index);
+                        option.textContent =
+                            a.index + " - " + (a.name || a.device || "Adapter");
+                        option.title = a.device || "";
+                        const isDisconnected = (a.name && a.name.includes("Chưa cắm cáp")) || a.connected === false;
+                        option.dataset.connected = isDisconnected ? "0" : "1";
+                        group.appendChild(option);
+                    });
+
+                    select.appendChild(group);
+                }
+
+                addGroup("Wi-Fi / Ethernet", normal);
+                addGroup("Loopback", loopbacks);
+
+                // Uu tien chon card dang hoat dong (co cam cap hoac Wi-Fi)
+                const connectedNormal = normal.filter(a => !(a.name && a.name.includes("Chưa cắm cáp")));
+                if (connectedNormal.length) {
+                    select.value = String(connectedNormal[0].index);
+                } else if (normal.length) {
+                    select.value = String(normal[0].index);
+                } else if (loopbacks.length) {
+                    select.value = String(loopbacks[0].index);
+                }
+
+                $("adapterHint").textContent =
+                    adapters.length + " card mạng được tìm thấy.";
+                $("adapterHint").className = "hint";
+
+                updateSelectedAdapter();
+                setStatus(captureActive);
+                if (showNotify) {
+                    alert("Đã quét và cập nhật lại danh sách card mạng thành công!");
+                }
+            } catch (error) {
+                select.replaceChildren(new Option("Không tải được card mạng", ""));
+                $("adapterHint").textContent = error.message;
+                $("adapterHint").className = "hint error";
+                setStatus(false, "Lỗi kết nối");
+                console.error(error);
+            }
+        }
+
+        function updateSelectedAdapter() {
+            const select = $("adapterSelect");
+            const option = select.options[select.selectedIndex];
+            $("deviceSelected").textContent =
+                option && option.value !== "" ? option.textContent : "Chưa chọn";
+
+            const isDisconnected = option && option.dataset.connected === "0";
+            if (isDisconnected) {
+                $("startBtn").disabled = true;
+                $("adapterHint").textContent =
+                    "⚠️ Card mạng này chưa cắm dây cáp mạng (Disconnected). Không thể bắt gói tin, hãy cắm cáp LAN hoặc chọn card Wi-Fi.";
+                $("adapterHint").className = "hint error";
+            } else {
+                $("startBtn").disabled = captureActive;
+                $("adapterHint").textContent = "Card mạng đã sẵn sàng để giám sát.";
+                $("adapterHint").className = "hint";
+            }
+        }
+
+        async function startCapture() {
+            const select = $("adapterSelect");
+            const option = select.options[select.selectedIndex];
+            if (option && option.dataset.connected === "0") {
+                alert("Card mạng này hiện chưa cắm cáp mạng LAN!\nVui lòng cắm dây cáp mạng vào cổng Ethernet hoặc chọn card Wi-Fi đang hoạt động.");
+                return;
+            }
+
+            const rawIndex = select.value;
+            if (rawIndex === "") {
+                alert("Hãy chọn card mạng trước.");
+                return;
+            }
+
+            const index = Number(rawIndex);
+            $("startBtn").disabled = true;
+
+            try {
+                await api("/api/start", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ index })
+                });
+
+                packetViewCleared = false;
+                await updateDashboard();
+            } catch (error) {
+                alert("Không thể bắt đầu: " + error.message);
+            } finally {
+                $("startBtn").disabled = false;
+            }
+        }
+
+        async function stopCapture() {
+            $("stopBtn").disabled = true;
+
+            try {
+                await api("/api/stop", { method: "POST" });
+                await updateDashboard();
+            } catch (error) {
+                alert("Không thể dừng: " + error.message);
+            } finally {
+                $("stopBtn").disabled = false;
+            }
+        }
+
+        function updateTraffic(value) {
+            if (!trafficChart) return;
+
+            trafficLabels.push(new Date().toLocaleTimeString("vi-VN"));
+            trafficValues.push(Number(value) || 0);
+
+            if (trafficLabels.length > 30) {
+                trafficLabels.shift();
+                trafficValues.shift();
+            }
+
+            trafficChart.update("none");
+        }
+
+        function updateProtocols(data) {
+            protocols = data && typeof data === "object" ? data : {};
+
+            const labels = Object.keys(protocols);
+            const values = labels.map(key => Number(protocols[key]) || 0);
+
+            [protocolChart, protocolDetailChart].forEach(chart => {
+                if (!chart) return;
+                chart.data.labels = labels;
+                chart.data.datasets[0].data = values;
+                chart.update("none");
+            });
+
+            const total = values.reduce((sum, value) => sum + value, 0);
+
+            $("protocolKinds").textContent = labels.length;
+            $("protocolTotal").textContent = total.toLocaleString("vi-VN");
+
+            const tbody = $("protocolTable");
+            tbody.replaceChildren();
+
+            if (!labels.length) {
+                const row = tbody.insertRow();
+                const cell = row.insertCell();
+                cell.colSpan = 3;
+                cell.className = "empty";
+                cell.textContent = "Chưa có dữ liệu giao thức";
+                return;
+            }
+
+            labels
+                .map((name, i) => ({ name, value: values[i] }))
+                .sort((a, b) => b.value - a.value)
+                .forEach(item => {
+                    const row = tbody.insertRow();
+                    row.insertCell().textContent = item.name;
+                    row.insertCell().textContent = item.value.toLocaleString("vi-VN");
+                    row.insertCell().textContent =
+                        total ? (item.value / total * 100).toFixed(2) + "%" : "0%";
+                });
+
+            updateProtocolFilter(labels);
+        }
+
+        let previousFilterOptions = "";
+
+        function updateProtocolFilter(labels) {
+            const select = $("protocolFilter");
+            const current = select.value;
+            const signature = labels.join("|");
+
+            if (signature === previousFilterOptions) return;
+            previousFilterOptions = signature;
+
+            select.replaceChildren(new Option("Tất cả giao thức", ""));
+
+            labels.forEach(label => {
+                select.add(new Option(label, label));
+            });
+
+            if (labels.includes(current)) select.value = current;
+        }
+
+        async function loadPackets() {
+            const data = await api("/api/packets");
+            const next = Array.isArray(data)
+                ? data
+                : (data.packets || data.items || []);
+
+            if (!Array.isArray(next)) {
+                throw new Error("Dữ liệu gói tin không đúng định dạng.");
+            }
+
+            packets = next;
+            renderPackets();
+            renderOverviewPackets();
+        }
+
+        function formatEndpointHtml(ip, port) {
+            if (!ip || ip === "-") return '<span style="color:var(--muted)">-</span>';
+            const hasPort = port && port !== "-" && port !== "" && port !== "0";
+
+            const ipSpan = `<span class="ip-text" title="${ip}">${ip}</span>`;
+            const portSpan = `<span class="ip-port">${hasPort ? `:${port}` : ''}</span>`;
+
+            return `<div class="ip-wrapper">${ipSpan}${portSpan}</div>`;
+        }
+
+        function makePacketRow(packet) {
+            const row = document.createElement("tr");
+
+            // 0: TIME
+            const cTime = document.createElement("td");
+            cTime.textContent = packet.time || "-";
+            row.appendChild(cTime);
+
+            // 1: PROTOCOL
+            const cProto = document.createElement("td");
+            const tag = document.createElement("span");
+            tag.className = "tag";
+            tag.textContent = packet.protocol || "-";
+            cProto.appendChild(tag);
+            row.appendChild(cProto);
+
+            // 2: SOURCE (Dễ đọc hơn: phân biệt v4/v6, gắn port, font monospace)
+            const cSrc = document.createElement("td");
+            cSrc.innerHTML = formatEndpointHtml(packet.src, packet.sport);
+            row.appendChild(cSrc);
+
+            // 3: DESTINATION (Dễ đọc hơn: phân biệt v4/v6, gắn port, font monospace)
+            const cDst = document.createElement("td");
+            cDst.innerHTML = formatEndpointHtml(packet.dst, packet.dport);
+            row.appendChild(cDst);
+
+            // 4: LENGTH
+            const cLen = document.createElement("td");
+            cLen.textContent = formatBytes(packet.length || 0);
+            row.appendChild(cLen);
+
+            return row;
+        }
+
+        function renderOverviewPackets() {
+            const tbody = $("overviewPackets");
+            tbody.replaceChildren();
+
+            const ipVer = $("ipVersionFilter") ? $("ipVersionFilter").value : "ipv4";
+            const filteredPackets = ipVer === "ipv4"
+                ? packets.filter(p => !((p.src && p.src.includes(":")) || (p.dst && p.dst.includes(":"))))
+                : (ipVer === "ipv6" ? packets.filter(p => (p.src && p.src.includes(":")) || (p.dst && p.dst.includes(":"))) : packets);
+
+            if (!filteredPackets.length) {
+                const row = tbody.insertRow();
+                const cell = row.insertCell();
+                cell.colSpan = 5;
+                cell.className = "empty";
+                cell.textContent = "Chưa có dữ liệu gói tin";
+                return;
+            }
+
+            filteredPackets.slice(-5).reverse().forEach(packet => {
+                tbody.appendChild(makePacketRow(packet));
+            });
+        }
+
+        function renderPackets() {
+            const tbody = $("packetTable");
+            if (!tbody) return;
+
+            tbody.replaceChildren();
+
+            const keyword = $("searchInput").value.trim().toLowerCase();
+            const protocol = $("protocolFilter").value;
+            const ipVer = $("ipVersionFilter") ? $("ipVersionFilter").value : "ipv4";
+            const maxRows = Number($("maxRows").value) || 100;
+
+            const filtered = packetViewCleared ? [] : packets.filter(packet => {
+                const isV6 = (packet.src && packet.src.includes(":")) || (packet.dst && packet.dst.includes(":"));
+
+                // Loc che do IPv4 (Mang LAN) vs IPv6
+                if (ipVer === "ipv4" && isV6) return false;
+                if (ipVer === "ipv6" && !isV6) return false;
+
+                const text = [
+                    packet.time, packet.protocol, packet.src, packet.dst,
+                    packet.sport, packet.dport, packet.length,
+                    isV6 ? "ipv6 v6" : "ipv4 v4 lan"
+                ].join(" ").toLowerCase();
+
+                const matchesText = text.includes(keyword);
+                const matchesProtocol =
+                    !protocol || String(packet.protocol || "") === protocol;
+
+                return matchesText && matchesProtocol;
+            });
+
+            filtered.slice(-maxRows).reverse().forEach(packet => {
+                tbody.appendChild(makePacketRow(packet));
+            });
+
+            if (!filtered.length) {
+                const row = tbody.insertRow();
+                const cell = row.insertCell();
+                cell.colSpan = 5;
+                cell.className = "empty";
+                cell.textContent = "Không có gói tin phù hợp";
+            }
+
+            $("packetCount").textContent =
+                "Hiển thị " + Math.min(filtered.length, maxRows) +
+                " / " + filtered.length + " gói tin phù hợp";
+        }
+
+        async function clearPacketView() {
+            if (!confirm("Bạn có chắc chắn muốn xóa toàn bộ số liệu thống kê (Tổng gói tin, dung lượng, biểu đồ và lịch sử) về 0?")) {
+                return;
+            }
+
+            try {
+                // Thu goi API reset tren backend C++
+                await api("/api/reset", { method: "POST" });
+            } catch (e) {
+                // Neu backend hien tai chua co /api/reset va dang khong capture, start/stop nhanh de reset
+                if (!captureActive) {
+                    const sel = $("adapterSelect");
+                    const idx = sel && sel.value ? Number(sel.value) : 1;
+                    try {
+                        await api("/api/start", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ index: idx })
+                        });
+                        await api("/api/stop", { method: "POST" });
+                    } catch (err) {}
+                }
+            }
+
+            // Xoa sach du lieu tren giao dien
+            packets = [];
+            protocols = {};
+            trafficLabels = [];
+            trafficValues = [];
+            packetViewCleared = false;
+
+            $("totalPackets").textContent = "0";
+            $("totalBytes").textContent = "0 B";
+            $("pps").textContent = "0";
+            $("bps").textContent = "0 bps";
+            $("devicePackets").textContent = "0";
+            $("deviceBytes").textContent = "0 B";
+            $("protocolKinds").textContent = "0";
+            $("protocolTotal").textContent = "0";
+
+            if (trafficChart) {
+                trafficChart.data.labels = [];
+                trafficChart.data.datasets[0].data = [];
+                trafficChart.update();
+            }
+            if (protocolChart) {
+                protocolChart.data.labels = [];
+                protocolChart.data.datasets[0].data = [];
+                protocolChart.update();
+            }
+            if (protocolDetailChart) {
+                protocolDetailChart.data.labels = [];
+                protocolDetailChart.data.datasets[0].data = [];
+                protocolDetailChart.update();
+            }
+
+            renderPackets();
+            renderOverviewPackets();
+            alert("Đã xóa sạch và đặt lại toàn bộ dữ liệu thống kê về 0!");
+        }
+
+        function exportCSV() {
+            if (!packets.length || packetViewCleared) {
+                alert("Không có dữ liệu để xuất.");
+                return;
+            }
+
+            const keyword = $("searchInput").value.trim().toLowerCase();
+            const protocol = $("protocolFilter").value;
+
+            const filtered = packets.filter(packet => {
+                const text = [
+                    packet.time, packet.protocol, packet.src, packet.dst,
+                    packet.sport, packet.dport, packet.length
+                ].join(" ").toLowerCase();
+
+                return text.includes(keyword) &&
+                    (!protocol || String(packet.protocol || "") === protocol);
+            });
+
+            if (!filtered.length) {
+                alert("Không có gói tin phù hợp để xuất.");
+                return;
+            }
+
+            const headers = ["TIME", "PROTOCOL", "SOURCE", "DESTINATION", "LENGTH"];
+            const rows = filtered.map(packet => [
+                packet.time || "",
+                packet.protocol || "",
+                packet.src || "",
+                packet.dst || "",
+                packet.length || 0
+            ]);
+
+            function escapeCSV(value) {
+                return '"' + String(value).replace(/"/g, '""') + '"';
+            }
+
+            const csv = "\uFEFF" +
+                [headers, ...rows].map(row => row.map(escapeCSV).join(",")).join("\r\n");
+
+            const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+
+            link.href = url;
+            link.download = "lan-monitor-packets.csv";
+            link.click();
+
+            URL.revokeObjectURL(url);
+        }
+
+        async function updateDashboard() {
+            if (polling) return;
+            polling = true;
+
+            try {
+                const data = await api("/api/status");
+                lastStatus = data;
+
+                const totalPackets = data.totalPackets ?? data.packets ?? 0;
+                const totalBytes = data.totalBytes ?? data.bytes ?? 0;
+
+                $("totalPackets").textContent =
+                    Number(totalPackets).toLocaleString("vi-VN");
+                $("totalBytes").textContent = formatBytes(totalBytes);
+                $("pps").textContent = Number(data.pps || 0).toFixed(1);
+                $("bps").textContent = formatRate(data.bps || 0);
+
+                captureActive = !!data.capturing;
+
+                $("startBtn").disabled = captureActive;
+                $("stopBtn").disabled = !captureActive;
+
+                setStatus(
+                    captureActive,
+                    data.error ? "LỖI BẮT GÓI TIN" :
+                        captureActive ? "ĐANG GIÁM SÁT" : "ĐANG DỪNG"
+                );
+
+                $("deviceCaptureState").textContent =
+                    captureActive ? "Đang giám sát" : "Đang dừng";
+                $("devicePackets").textContent =
+                    Number(totalPackets).toLocaleString("vi-VN");
+                $("deviceBytes").textContent = formatBytes(totalBytes);
+
+                if (data.error) {
+                    $("adapterHint").textContent = data.error;
+                    $("adapterHint").className = "hint error";
+                }
+
+                updateTraffic(data.bps || 0);
+                updateProtocols(data.protocols || {});
+                await loadPackets();
+
+            } catch (error) {
+                setStatus(false, "Mất kết nối máy chủ");
+                $("packetCount").textContent = "Lỗi: " + error.message;
+                console.error("Dashboard error:", error);
+            } finally {
+                polling = false;
+            }
+        }
+
+        function changeRefreshInterval() {
+            refreshMs = Number($("refreshInterval").value) || 1000;
+
+            if (timer) clearInterval(timer);
+            timer = setInterval(updateDashboard, refreshMs);
+        }
+
+        $("adapterSelect").addEventListener("change", updateSelectedAdapter);
+
+        initCharts();
+        loadAdapters();
+        updateDashboard();
+        timer = setInterval(updateDashboard, refreshMs);
+
+    </script>
+</body>
+
+</html>

@@ -1,21 +1,5 @@
-﻿# Các tệp biên dịch và thư mục build
-*.exe
-*.obj
-*.ilk
-*.pdb
-*.aps
-*.idb
-*.nch
-*.pch
-/Debug/
-/Release/
-/x64/
-/.vs/
-
-# Dữ liệu log, file kết quả test
-*.csv
-*.etl
-*.txt
-
-# Thư viện hoặc thư mục phụ thuộc ngoài
+﻿*.exe
+*.dll
+*.sys
+*.log
 WinDivert/
